@@ -1,14 +1,23 @@
-output "windows_public_ip" {
-  description = "Public IP of the Windows dev VM (RDP here, from var.my_ip only)."
-  value       = aws_instance.windows.public_ip
-}
-
-output "gpu_private_ip" {
-  description = "Private IP of the GPU inference box (Ollama on :11434, reachable only from dev-sg)."
-  value       = aws_instance.gpu.private_ip
+output "gpu_public_ip" {
+  description = "Public IP of the GPU inference box (Ollama on :11434, SSH on :22, both reachable only from var.my_ip)."
+  value       = aws_instance.gpu.public_ip
 }
 
 output "next_steps" {
-  description = "One-line reminder of what to do next."
-  value       = "RDP to ${aws_instance.windows.public_ip}:3389 (decrypt the password with: aws ec2 get-password-data --instance-id ${aws_instance.windows.id} --priv-launch-key /path/to/${var.key_pair_name}.pem), read Desktop\\README.txt, then run opencode -- and push everything to GitHub before you run terraform destroy."
+  description = "How to point your local machine at the remote Ollama server."
+  value       = <<-EOT
+    GPU box is up at ${aws_instance.gpu.public_ip}. The model ("${var.ollama_model}") can
+    take several minutes to pull after first boot -- if a request fails, wait and retry.
+
+    Option A -- use the ollama CLI locally, pointed at the remote server:
+        export OLLAMA_HOST=http://${aws_instance.gpu.public_ip}:11434
+        ollama run ${var.ollama_model}
+
+    Option B -- point any OpenAI-compatible client (OpenCode, etc.) at:
+        http://${aws_instance.gpu.public_ip}:11434/v1
+
+    Model weights live on the GPU box's ephemeral NVMe instance store and are
+    wiped on stop/terminate (re-pulled automatically on next boot). Run
+    `terraform destroy` when you're done to remove everything and stop billing.
+  EOT
 }
