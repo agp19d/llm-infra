@@ -1,0 +1,59 @@
+name: Terraform Apply
+
+on:
+  workflow_dispatch:
+    inputs:
+      my_ip:
+        description: "Your current public IP in /32 CIDR notation -- auto-filled by scripts/deploy.*, don't type by hand"
+        required: true
+        type: string
+      key_pair_name:
+        description: "Existing EC2 key pair name for SSH access"
+        required: false
+        type: string
+        default: "disposable-dev"
+      ollama_model:
+        description: "Ollama model tag to deploy (leave blank for the repo default)"
+        required: false
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: llm-infra-terraform
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.10.5"
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Terraform init
+        run: terraform init
+
+      - name: Terraform apply
+        env:
+          TF_VAR_my_ip: ${{ inputs.my_ip }}
+          TF_VAR_key_pair_name: ${{ inputs.key_pair_name }}
+          TF_VAR_ollama_model: ${{ inputs.ollama_model }}
+        run: |
+          if [ -z "$TF_VAR_ollama_model" ]; then unset TF_VAR_ollama_model; fi
+          terraform apply -auto-approve -input=false
+
+      - name: Show outputs
+        run: terraform output

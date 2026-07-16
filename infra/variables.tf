@@ -22,12 +22,12 @@ variable "my_ip" {
 variable "ollama_model" {
   description = <<-EOT
     Ollama model tag to pull on the GPU instance and configure in OpenCode.
-    Default (52GB, 80B-A3B MoE) needs the g6e.12xlarge's 192GB total VRAM
-    (4x L40S) to run with no CPU offload -- see the comment in
-    userdata/gpu_init.sh.tpl before switching to a smaller instance type.
+    Default (24GB, 35B-A3B MoE) comfortably fits the g6e.xlarge's single
+    L40S (48GB VRAM) with no CPU offload -- see the comment in
+    userdata/gpu_init.sh.tpl before switching to a larger model/instance.
   EOT
   type        = string
-  default     = "huihui_ai/qwen3-coder-next-abliterated:q4_K"
+  default     = "rafw007/Qwen3.6-35B-A3B-mlx-claude-coder-abliterated"
 }
 
 variable "key_pair_name" {

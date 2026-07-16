@@ -110,16 +110,18 @@ data "aws_ssm_parameter" "dlami_gpu" {
 
 # ---------------------------------------------------------------------------
 # GPU inference instance (Spot) -- Ollama serving the configured model.
-# g6e.12xlarge: 4x L40S / 192GB total VRAM, needed to fit the 52GB default
-# model without CPU offload (a single-GPU g6e.xlarge only has 48GB). Spot at
-# this size cuts a meaningful chunk off the $10.49/hr on-demand rate; a
-# disposable dev box doesn't need interruption protection beyond what's
-# already here (weights are ephemeral and re-pull on next boot anyway).
+# g6e.xlarge: 1x L40S / 48GB VRAM. The 24GB default model fits with headroom
+# to spare; bump instance_type to a multi-GPU g6e size (e.g. g6e.12xlarge,
+# 4x L40S / 192GB) if you switch var.ollama_model to something bigger (see
+# userdata/gpu_init.sh.tpl). Spot cuts a meaningful chunk off the $1.86/hr
+# on-demand rate; a disposable dev box doesn't need interruption protection
+# beyond what's already here (weights are ephemeral and re-pull on next boot
+# anyway).
 # ---------------------------------------------------------------------------
 
 resource "aws_instance" "gpu" {
   ami                    = data.aws_ssm_parameter.dlami_gpu.value
-  instance_type          = "g6e.12xlarge"
+  instance_type          = "g6e.xlarge"
   subnet_id              = aws_subnet.public.id
   vpc_security_group_ids = [aws_security_group.gpu.id]
   key_name               = var.key_pair_name

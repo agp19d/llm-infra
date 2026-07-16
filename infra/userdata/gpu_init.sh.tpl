@@ -49,16 +49,10 @@ for i in $(seq 1 30); do
   sleep 2
 done
 
-# Default model: huihui_ai/qwen3-coder-next-abliterated:q4_K -- 52GB, 80B-A3B MoE,
-# 256K context, explicitly tools-tagged. Needs the g6e.12xlarge's 192GB total
-# VRAM (4x L40S) to load with no CPU offload -- on a single-GPU instance
-# (48GB or less) it falls back to partial CPU offload, which is slow and can
-# thrash if system RAM is also small (workable in principle since only ~3B
-# params are active per token, but not recommended).
-# https://ollama.com/huihui_ai/qwen3-coder-next-abliterated
-#
-# Lighter alternative (set var.ollama_model to use it, fits any single-GPU
-# g6e instance): huihui_ai/qwen3-coder-abliterated:30b -- 19GB Q4_K_M,
-# 30B-A3B MoE, 256K context. https://ollama.com/huihui_ai/qwen3-coder-abliterated
-# Source weights: https://huggingface.co/huihui-ai
+# Default model: rafw007/Qwen3.6-35B-A3B-mlx-claude-coder-abliterated -- 24GB
+# Q4_K_M GGUF, 35B-A3B MoE (~3B active params/token), 64K context, tuned as
+# a Claude-Code-style coding agent. Fits comfortably on the default
+# g6e.xlarge's single L40S (48GB VRAM); bump instance_type to a multi-GPU
+# g6e size if you switch to a larger var.ollama_model.
+# https://ollama.com/rafw007/Qwen3.6-35B-A3B-mlx-claude-coder-abliterated
 ollama pull "${ollama_model}"
