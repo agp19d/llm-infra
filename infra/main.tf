@@ -23,11 +23,12 @@ resource "aws_vpc" "main" {
 resource "aws_subnet" "public" {
   vpc_id     = aws_vpc.main.id
   cidr_block = "10.0.1.0/24"
-  # names[0] (us-east-1a) hit Server.InsufficientInstanceCapacity for
-  # g6e.xlarge Spot on 2026-07-16; names[1] is just the next AZ over. Spot
-  # capacity shifts over time -- if this AZ runs dry too, try another index
-  # or drop the index and pick the AZ AWS's error message names as available.
-  availability_zone       = data.aws_availability_zones.available.names[1]
+  # us-east-1a (2026-07-16) and us-east-1b (2026-07-16, later same day) both
+  # hit Server.InsufficientInstanceCapacity for g6e.xlarge Spot -- switching
+  # to on-demand above should make this rare, but if this AZ runs dry too,
+  # try another index or drop the index and pick the AZ AWS's error message
+  # names as available.
+  availability_zone       = data.aws_availability_zones.available.names[2]
   map_public_ip_on_launch = true
 
   tags = merge(local.common_tags, { Name = "disposable-dev-public" })
@@ -113,14 +114,17 @@ data "aws_ssm_parameter" "dlami_gpu" {
 }
 
 # ---------------------------------------------------------------------------
-# GPU inference instance (Spot) -- Ollama serving the configured model.
+# GPU inference instance (on-demand) -- Ollama serving the configured model.
 # g6e.xlarge: 1x L40S / 48GB VRAM. The 24GB default model fits with headroom
-# to spare; bump instance_type to a multi-GPU g6e size (e.g. g6e.12xlarge,
-# 4x L40S / 192GB) if you switch var.ollama_model to something bigger (see
-# userdata/gpu_init.sh.tpl). Spot cuts a meaningful chunk off the $1.86/hr
-# on-demand rate; a disposable dev box doesn't need interruption protection
-# beyond what's already here (weights are ephemeral and re-pull on next boot
-# anyway).
+# to spare -- this is the smallest g6e size, sized to the default model with
+# no CPU offload; bump instance_type to a multi-GPU g6e size (e.g.
+# g6e.12xlarge, 4x L40S / 192GB) if you switch var.ollama_model to something
+# bigger (see userdata/gpu_init.sh.tpl). On-demand instead of Spot: g6e Spot
+# capacity is thin enough per-AZ that Server.InsufficientInstanceCapacity was
+# recurring across multiple AZs in the same day; on-demand draws from AWS's
+# larger reserved capacity pool instead of Spot's leftover pool. Still a
+# disposable box either way (dead-man switch below, weights re-pull on next
+# boot).
 # ---------------------------------------------------------------------------
 
 resource "aws_instance" "gpu" {
@@ -129,15 +133,6 @@ resource "aws_instance" "gpu" {
   subnet_id              = aws_subnet.public.id
   vpc_security_group_ids = [aws_security_group.gpu.id]
   key_name               = var.key_pair_name
-
-  instance_market_options {
-    market_type = "spot"
-
-    spot_options {
-      instance_interruption_behavior = "terminate"
-      spot_instance_type             = "one-time"
-    }
-  }
 
   root_block_device {
     volume_size           = 100

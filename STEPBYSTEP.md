@@ -32,7 +32,7 @@ scripts/deploy.sh
 ```
 
 This auto-detects your current public IP (no typing/pasting it anywhere) and
-triggers the `apply.yml` GitHub Actions workflow, which spins up the spot GPU
+triggers the `apply.yml` GitHub Actions workflow, which spins up the GPU
 instance and pulls the default model
 (`rafw007/Qwen3.6-35B-A3B-mlx-claude-coder-abliterated`, ~24GB).
 
