@@ -21,9 +21,13 @@ resource "aws_vpc" "main" {
 }
 
 resource "aws_subnet" "public" {
-  vpc_id                  = aws_vpc.main.id
-  cidr_block              = "10.0.1.0/24"
-  availability_zone       = data.aws_availability_zones.available.names[0]
+  vpc_id     = aws_vpc.main.id
+  cidr_block = "10.0.1.0/24"
+  # names[0] (us-east-1a) hit Server.InsufficientInstanceCapacity for
+  # g6e.xlarge Spot on 2026-07-16; names[1] is just the next AZ over. Spot
+  # capacity shifts over time -- if this AZ runs dry too, try another index
+  # or drop the index and pick the AZ AWS's error message names as available.
+  availability_zone       = data.aws_availability_zones.available.names[1]
   map_public_ip_on_launch = true
 
   tags = merge(local.common_tags, { Name = "disposable-dev-public" })
