@@ -54,54 +54,37 @@ resource "aws_route_table_association" "public" {
 # ---------------------------------------------------------------------------
 # Security groups
 #
-# No ingress rule anywhere allows 0.0.0.0/0. RDP is locked to var.my_ip, and
-# the Ollama port is locked to traffic originating from dev-sg specifically
-# (not a CIDR), so the GPU box is unreachable from anywhere but the dev VM.
+# No ingress rule anywhere allows 0.0.0.0/0. Both SSH and the Ollama API are
+# locked to var.my_ip, so the GPU box is unreachable from anywhere but your
+# own public IP.
 # ---------------------------------------------------------------------------
-
-resource "aws_security_group" "dev" {
-  name        = "dev-sg"
-  description = "Windows dev VM: RDP from my IP only, all outbound"
-  vpc_id      = aws_vpc.main.id
-
-  tags = merge(local.common_tags, { Name = "dev-sg" })
-}
-
-resource "aws_vpc_security_group_ingress_rule" "dev_rdp" {
-  security_group_id = aws_security_group.dev.id
-  description       = "RDP from my public IP only"
-  cidr_ipv4         = var.my_ip
-  from_port         = 3389
-  to_port           = 3389
-  ip_protocol       = "tcp"
-
-  tags = local.common_tags
-}
-
-resource "aws_vpc_security_group_egress_rule" "dev_all_out" {
-  security_group_id = aws_security_group.dev.id
-  description       = "Allow all outbound (needed for GitHub over 443/22, package installs)"
-  cidr_ipv4         = "0.0.0.0/0"
-  ip_protocol       = "-1"
-
-  tags = local.common_tags
-}
 
 resource "aws_security_group" "gpu" {
   name        = "gpu-sg"
-  description = "GPU inference box: Ollama API reachable from dev-sg only, all outbound"
+  description = "GPU inference box: SSH and Ollama API from my IP only, all outbound"
   vpc_id      = aws_vpc.main.id
 
   tags = merge(local.common_tags, { Name = "gpu-sg" })
 }
 
+resource "aws_vpc_security_group_ingress_rule" "gpu_ssh" {
+  security_group_id = aws_security_group.gpu.id
+  description       = "SSH from my public IP only"
+  cidr_ipv4         = var.my_ip
+  from_port         = 22
+  to_port           = 22
+  ip_protocol       = "tcp"
+
+  tags = local.common_tags
+}
+
 resource "aws_vpc_security_group_ingress_rule" "gpu_ollama" {
-  security_group_id            = aws_security_group.gpu.id
-  description                  = "Ollama API from dev-sg only"
-  referenced_security_group_id = aws_security_group.dev.id
-  from_port                    = 11434
-  to_port                      = 11434
-  ip_protocol                  = "tcp"
+  security_group_id = aws_security_group.gpu.id
+  description       = "Ollama API from my public IP only"
+  cidr_ipv4         = var.my_ip
+  from_port         = 11434
+  to_port           = 11434
+  ip_protocol       = "tcp"
 
   tags = local.common_tags
 }
@@ -125,12 +108,15 @@ data "aws_ssm_parameter" "dlami_gpu" {
   name = "/aws/service/deeplearning/ami/x86_64/base-oss-nvidia-driver-gpu-ubuntu-22.04/latest/ami-id"
 }
 
-data "aws_ssm_parameter" "windows" {
-  name = "/aws/service/ami-windows-latest/Windows_Server-2022-English-Full-Base"
-}
-
 # ---------------------------------------------------------------------------
-# GPU inference instance (Spot) -- Ollama serving the configured model
+# GPU inference instance (Spot) -- Ollama serving the configured model.
+# g6e.xlarge: 1x L40S / 48GB VRAM. The 24GB default model fits with headroom
+# to spare; bump instance_type to a multi-GPU g6e size (e.g. g6e.12xlarge,
+# 4x L40S / 192GB) if you switch var.ollama_model to something bigger (see
+# userdata/gpu_init.sh.tpl). Spot cuts a meaningful chunk off the $1.86/hr
+# on-demand rate; a disposable dev box doesn't need interruption protection
+# beyond what's already here (weights are ephemeral and re-pull on next boot
+# anyway).
 # ---------------------------------------------------------------------------
 
 resource "aws_instance" "gpu" {
@@ -142,13 +128,15 @@ resource "aws_instance" "gpu" {
 
   instance_market_options {
     market_type = "spot"
+
     spot_options {
-      spot_instance_type = "one-time"
+      instance_interruption_behavior = "terminate"
+      spot_instance_type             = "one-time"
     }
   }
 
   root_block_device {
-    volume_size           = 60
+    volume_size           = 100
     volume_type           = "gp3"
     delete_on_termination = true
   }
@@ -161,47 +149,7 @@ resource "aws_instance" "gpu" {
 }
 
 # ---------------------------------------------------------------------------
-# Windows dev VM -- OpenCode pointed at the GPU box's private IP
-# ---------------------------------------------------------------------------
-
-locals {
-  opencode_config_json = templatefile("${path.module}/userdata/opencode.json.tpl", {
-    gpu_private_ip = aws_instance.gpu.private_ip
-    ollama_model   = var.ollama_model
-  })
-
-  desktop_readme_txt = templatefile("${path.module}/userdata/readme.txt.tpl", {
-    gpu_private_ip = aws_instance.gpu.private_ip
-    ollama_model   = var.ollama_model
-    key_pair_name  = var.key_pair_name
-  })
-
-  windows_user_data = templatefile("${path.module}/userdata/windows_init.ps1.tpl", {
-    opencode_config_json = local.opencode_config_json
-    readme_txt           = local.desktop_readme_txt
-  })
-}
-
-resource "aws_instance" "windows" {
-  ami                    = data.aws_ssm_parameter.windows.value
-  instance_type          = "t3.xlarge"
-  subnet_id              = aws_subnet.public.id
-  vpc_security_group_ids = [aws_security_group.dev.id]
-  key_name               = var.key_pair_name
-
-  root_block_device {
-    volume_size           = 100
-    volume_type           = "gp3"
-    delete_on_termination = true
-  }
-
-  user_data = local.windows_user_data
-
-  tags = merge(local.common_tags, { Name = "windows-dev" })
-}
-
-# ---------------------------------------------------------------------------
-# Dead-man switch -- stop both instances 5h after apply if I forget to
+# Dead-man switch -- stop the GPU instance 5h after apply if I forget to
 # destroy. Uses EventBridge Scheduler (the successor to plain EventBridge
 # cron rules) for an exact one-shot firing rather than a recurring rule,
 # which is a better fit for "N hours after launch". The schedule itself is
@@ -236,7 +184,7 @@ data "aws_iam_policy_document" "scheduler_stop_instances" {
   statement {
     effect    = "Allow"
     actions   = ["ec2:StopInstances"]
-    resources = [aws_instance.gpu.arn, aws_instance.windows.arn]
+    resources = [aws_instance.gpu.arn]
   }
 }
 
@@ -262,7 +210,7 @@ resource "aws_scheduler_schedule" "dead_man_switch" {
     role_arn = aws_iam_role.scheduler.arn
 
     input = jsonencode({
-      InstanceIds = [aws_instance.gpu.id, aws_instance.windows.id]
+      InstanceIds = [aws_instance.gpu.id]
     })
   }
 }
