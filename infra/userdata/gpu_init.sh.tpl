@@ -2,6 +2,11 @@
 set -euxo pipefail
 exec > >(tee /var/log/user-data.log) 2>&1
 
+# cloud-init runs this as root without $HOME set, which crashes the ollama
+# CLI ("panic: $HOME is not defined" in envconfig.Models()) as soon as it
+# tries to resolve its config dir -- e.g. on `ollama pull` below.
+export HOME=/root
+
 # --- Use the DLAMI's ephemeral NVMe mount for model weights -----------------
 # Model weights live on instance store, not the EBS root disk: it's free,
 # fast, and vanishes on stop/terminate, which is exactly what we want for a
